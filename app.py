@@ -449,7 +449,7 @@ if page == "Single Review":
                         
                             for item in aspects:
                         
-                                aspect = item.get("aspect", "Unknown")
+                                aspect = (item.get("aspect")or item.get("aspect_name")or item.get("name")or "Unknown")
                                 sentiment = item.get("sentiment", "Unknown")
                         
                                 # Color by sentiment
@@ -470,7 +470,7 @@ if page == "Single Review":
                                     <div style="
                                         background-color:{color}15;
                                         border-left:6px solid {color};
-                                        padding:12px;603
+                                        padding:12px;
                                         border-radius:10px;
                                         margin-bottom:10px;
                                     ">

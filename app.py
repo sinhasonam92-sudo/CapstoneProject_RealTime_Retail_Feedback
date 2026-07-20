@@ -441,18 +441,31 @@ if page == "Single Review":
                             product_class,
                         )
                         
-                        st.subheader("🎯 Aspect Sentiments")
+                        st.subheader("🎯 Aspect Analysis")
 
                         aspects = analysis.get("aspect_sentiments", [])
                         
                         if aspects:
                         
                             for item in aspects:
-                        
-                                aspect = item.get("aspect", "Unknown")
-                                sentiment = item.get("sentiment", "Unknown")
-                        
-                                # Color by sentiment
+                                if isinstance(item, dict):
+                                    aspect = (
+                                        item.get("aspect")
+                                        or item.get("aspect_name")
+                                        or item.get("name")
+                                        or "Unknown"
+                                    )
+                                    sentiment = item.get("sentiment", "Unknown")
+                                elif isinstance(item, str):
+    
+                                    aspect = item
+                                    sentiment = "Unknown"
+
+                                else:
+        
+                                    aspect = "Unknown"
+                                    sentiment = "Unknown"
+
                                 if sentiment.lower() == "positive":
                                     color = "#2ECC71"   # green
                                     icon = "✅"

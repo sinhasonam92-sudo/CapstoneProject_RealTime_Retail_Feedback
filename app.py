@@ -449,7 +449,7 @@ if page == "Single Review":
                         
                             for item in aspects:
                         
-                                aspect = (item.get("aspect")or item.get("aspect_name")or item.get("name")or "Unknown")
+                                aspect = item.get("aspect", "Unknown")
                                 sentiment = item.get("sentiment", "Unknown")
                         
                                 # Color by sentiment

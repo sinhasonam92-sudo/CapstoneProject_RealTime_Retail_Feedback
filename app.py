@@ -24,16 +24,9 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from model.llm_analysis import analyze_review
-
+from model.llm_analysis import analyze_feedback
 
 from utils.report_generator import generate_report
-
-from model.llm_sentiment import (
-    predict_zero_shot,
-    predict_few_shot,
-    predict_chain_of_thought,
-)
 
 if "batch_results" not in st.session_state:
     st.session_state.batch_results = pd.DataFrame()
@@ -182,15 +175,25 @@ def detect_review_column(df):
 
 def safe_value(row, column, default=None):
     """
-    Safely fetch dataframe value.
+    Safely fetch dataframe value (case-insensitive and space-tolerant).
     """
 
+    # Exact match
     if column in row.index:
         return row[column]
 
+    # Normalize dataframe columns
+    normalized = {
+        str(col).strip().lower(): col
+        for col in row.index
+    }
+
+    key = column.strip().lower()
+
+    if key in normalized:
+        return row[normalized[key]]
+
     return default
-
-
 
 def show_metric(label, value):
 
@@ -309,41 +312,50 @@ if page == "Single Review":
                     # ------------------------------------
                     # Sentiment Analysis
                     # ------------------------------------
+                    llm_results = analyze_feedback(
+                        review_text=review,
+                        department=department,
+                        product_class=product_class,
+                    )
 
                     # Zero-Shot
-                    zero_result = predict_zero_shot(review)
+                    zero_result = llm_results["zero_shot"]
                     
                     # Few-Shot
-                    few_result = predict_few_shot(review)
+                    few_result = llm_results["few_shot"]
                     
                     # Chain-of-Thought
-                    cot_result = predict_chain_of_thought(review)
+                    cot_result = llm_results["cot"]
                     
                     # -------------------------------------------------------
                     # Store all predictions
                     # -------------------------------------------------------
                     
                     all_predictions = {
-                        "Zero-Shot": zero_result["sentiment"],
-                        "Few-Shot": few_result["sentiment"],
-                        "Chain-of-Thought": cot_result["sentiment"],
+                        "Zero-Shot": zero_result.get("overall_sentiment", "N/A"),
+                        "Few-Shot": few_result.get("overall_sentiment", "N/A"),
+                        "Chain-of-Thought": cot_result.get("overall_sentiment", "N/A"),
                     }
                     
                     # Use Chain-of-Thought as the final sentiment
                     final_sentiment = all_predictions["Chain-of-Thought"]
                     st.success("Analysis Completed Successfully!")
                     # ------------------------------------
-                    # Azure OpenAI Analysis
+                    # Azure OpenAI Analysis (Zero / Few / CoT)
                     # ------------------------------------
-
-                    analysis = analyze_review(
-                        age=age,
-                        recommended=recommended,
-                        division=division,
+                    
+                    llm_results = analyze_feedback(
+                        review_text=review,
                         department=department,
                         product_class=product_class,
-                        review=review,
                     )
+                    
+                    zero_shot = llm_results["zero_shot"]
+                    few_shot_llm = llm_results["few_shot"]
+                    cot_llm = llm_results["cot"]
+                    
+                    # Use Chain-of-Thought result as the main analysis
+                    analysis = cot_llm
 
                     # ------------------------------------
                     # Display Metrics
@@ -363,8 +375,13 @@ if page == "Single Review":
                         st.markdown("### Zero-Shot")
                     
                         st.metric(
-                            "Prediction",
-                            zero_result["sentiment"]
+                            "Sentiment",
+                            zero_result.get("overall_sentiment","N/A")
+                        )
+                    
+                        st.metric(
+                            "Rating",
+                            f"{zero_shot.get('predicted_rating','N/A')}/5"
                         )
                     
                     with c2:
@@ -372,25 +389,34 @@ if page == "Single Review":
                         st.markdown("### Few-Shot")
                     
                         st.metric(
-                            "Prediction",
-                            few_result["sentiment"]
-                        )
+                            "Sentiment",
+                            few_result.get("overall_sentiment", "N/A")
+                        )               
+                    
+                        st.metric(
+                            "Rating",
+                            f"{few_result.get('predicted_rating', 'N/A')}/5"
+                        )               
                     
                     with c3:
                     
                         st.markdown("### Chain-of-Thought")
                     
                         st.metric(
-                            "Prediction",
-                            cot_result["sentiment"]
+                            "Sentiment",
+                            cot_result.get("overall_sentiment", "N/A")
+                        )
+                        st.metric(
+                            "Rating",
+                            f"{cot_result.get('predicted_rating', 'N/A')}/5"
                         )
                     
                     st.divider()
                     m1, m2, m3 = st.columns(3)
                     with m1:
                         st.metric(
-                            "Estimated Rating",
-                            f"{analysis['estimated_rating']}/5"
+                            "Final Estimated Rating",
+                            f"{analysis.get('predicted_rating', 'N/A')}/5"
                         )
                 
                     with m2:
@@ -398,12 +424,7 @@ if page == "Single Review":
                             "Final Sentiment",
                             final_sentiment
                         )
-                
-                    with  m3:
-                        st.metric(
-                            "Urgency",
-                            analysis["urgency"]
-                        )
+
                     st.divider()
 
                     left, right = st.columns(2)
@@ -411,36 +432,98 @@ if page == "Single Review":
                     with left:
 
                         st.subheader("📦 Product Details")
-
-                        st.write(
-                            "**Product:**",
-                            analysis["product"],
-                        )
-
-                        st.write(
-                            "**Category:**",
-                            analysis["category"],
-                        )
-
                         st.write(
                             "**Department:**",
-                            analysis["department"],
+                            department,
                         )
+                        st.write(
+                            "**Product Class:**",
+                            product_class,
+                        )
+                        
+                        st.subheader("🎯 Aspect Sentiments")
 
+                        aspects = analysis.get("aspect_sentiments", [])
+                        
+                        if aspects:
+                        
+                            for item in aspects:
+                        
+                                aspect = item.get("aspect", "Unknown")
+                                sentiment = item.get("sentiment", "Unknown")
+                        
+                                # Color by sentiment
+                                if sentiment.lower() == "positive":
+                                    color = "#2ECC71"   # green
+                                    icon = "✅"
+
+                                elif sentiment.lower() == "negative":
+                                    color = "#E74C3C"   # red
+                                    icon = "❌"
+                        
+                                else:
+                                    color = "#F39C12"   # orange
+                                    icon = "⚠️"
+
+                                st.markdown(
+                                    f"""
+                                    <div style="
+                                        background-color:{color}15;
+                                        border-left:6px solid {color};
+                                        padding:12px;603
+                                        border-radius:10px;
+                                        margin-bottom:10px;
+                                    ">
+                                        <div style="font-size:18px;font-weight:600;">
+                                            {icon} {aspect}
+                                        </div>
+                                        <div style="font-size:16px;color:{color};font-weight:600;">
+                                            {sentiment}
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+
+                        else:
+                            st.info("No aspect sentiments detected.")
+                    
                     with right:
 
                         st.subheader("📋 AI Summary")
-
+                
                         st.info(
-                            analysis["summary"]
+                        analysis.get("review_summary", analysis.get("summary", "No summary available."))
                         )
-
-                        st.subheader(
-                            "✅ Recommended Action"
+                    
+                        st.subheader("⚡ Backend Priority")
+                    
+                        st.warning(
+                            analysis.get("backend_priority", analysis.get("urgency", "N/A"))
                         )
-
+                    
+                        st.subheader("🏷️ Backend Category")
+                    
+                        st.write(
+                            analysis.get("backend_category", analysis.get("backend_category", "N/A"))
+                        )
+                    
+                        st.subheader("💡 Business Insight")
+                    
+                        st.info(
+                            analysis.get("business_insight", analysis.get("business_insight", "N/A"))
+                        )
+                    
+                        st.subheader("💬 Customer Response")
+                    
                         st.success(
-                            analysis["recommended_action"]
+                            analysis.get("customer_response", "No customer response generated.")
+                        )
+                    
+                        st.subheader("✅ Recommended Action")
+                    
+                        st.success(
+                            analysis.get("backend_action", analysis.get("recommended_action", "No action recommended."))
                         )
 
                     # ------------------------------------
@@ -455,18 +538,11 @@ if page == "Single Review":
                         product_class=product_class,
                         review=review,
                         bert_result={
-                            "sentiment": cot_result["sentiment"],
+                            "sentiment": cot_result["overall_sentiment"],
                         },
                         analysis=analysis,
                     )
 
-
-                    st.download_button(
-                        label="⬇ Download Current Report (CSV)",
-                        data=report_df.to_csv(index=False),
-                        file_name="Retail_Report.csv",
-                        mime="text/csv",
-                    )
 
                 except Exception as e:
 
@@ -533,47 +609,23 @@ elif page == "Batch Analysis":
                     )
                 )
 
-                zero_result = predict_zero_shot(review)
-                few_result = predict_few_shot(review)
-                cot_result = predict_chain_of_thought(review)
-
                 try:
 
-                    analysis = analyze_review(
-
-                        age=safe_value(
-                            row,
-                            "Age",
-                            0
-                        ),
-
-                        recommended=safe_value(
-                            row,
-                            "Recommended IND",
-                            "Unknown"
-                        ),
-
-                        division=safe_value(
-                            row,
-                            "Division Name",
-                            "Unknown"
-                        ),
-
-                        department=safe_value(
-                            row,
-                            "Department Name",
-                            "Unknown"
-                        ),
-
-                        product_class=safe_value(
-                            row,
-                            "Class Name",
-                            "Unknown"
-                        ),
-
-                        review=review,
-
+                    llm_results = analyze_feedback(
+                        review_text=review,
+                        department=safe_value(row, "Department Name", "Unknown"),
+                        product_class=safe_value(row, "Class Name", "Unknown"),
                     )
+                    
+                    analysis = llm_results["cot"]
+                    # Zero-Shot
+                    zero_result = llm_results["zero_shot"]
+                    
+                    # Few-Shot
+                    few_result = llm_results["few_shot"]
+                    
+                    # Chain-of-Thought
+                    cot_result = llm_results["cot"]
 
                 except Exception as e:
 
@@ -581,13 +633,14 @@ elif page == "Batch Analysis":
 
                     analysis = {
 
-                        "estimated_rating": 3,
-                        "product": "Unknown",
-                        "category": "Unknown",
-                        "department": "Unknown",
-                        "urgency": "Low",
-                        "summary": "Analysis failed.",
-                        "recommended_action": "Manual Review"
+                        "predicted_rating": 3,
+                        "overall_sentiment": "Mixed",
+                        "backend_category": "Unknown",
+                        "backend_priority": "Low",
+                        "review_summary": "Analysis failed.",
+                        "backend_action": "Manual Review",
+                        "business_insight": "LLM analysis failed",
+                        "aspect_sentiments": []                       
 
                     }
 
@@ -599,7 +652,7 @@ elif page == "Batch Analysis":
                     "Recommended":
                         safe_value(
                             row,
-                            "Recommended IND",
+                            "Recommended",
                             ""
                         ),
 
@@ -607,54 +660,53 @@ elif page == "Batch Analysis":
                     "Division":
                         safe_value(
                             row,
-                            "Division Name",
+                            "Division_Name",
                             ""
                         ),
 
                     "Department":
                         safe_value(
                             row,
-                            "Department Name",
+                            "Department_Name",
                             ""
                         ),
 
                     "Product Class":
                         safe_value(
                             row,
-                            "Class Name",
+                            "Product_Class",
                             ""
                         ),
 
                     "Customer Review":
                         review,
 
-                    "Zero-Shot": zero_result["sentiment"],
-                    "Few-Shot": few_result["sentiment"],
-                    "Chain-of-Thought": cot_result["sentiment"],
+                    "Zero-Shot": zero_result["overall_sentiment"],
+                    "Few-Shot": few_result["overall_sentiment"],
+                    "Chain-of-Thought": cot_result["overall_sentiment"],
                     
                     # Final sentiment (use CoT)
-                    "Sentiment": cot_result["sentiment"],
+                    "Sentiment": cot_result["overall_sentiment"],
 
-                    "Estimated Rating":
-                        analysis["estimated_rating"],
+                    "Predicted Rating": analysis.get("predicted_rating", 3),
 
                     "Product":
-                        analysis["product"],
-
+                        safe_value(row, "Class Name", "Unknown"),
+                        
                     "Category":
-                        analysis["category"],
-
+                        analysis.get("backend_category", analysis.get("category", "Unknown")),
+                        
                     "Detected Department":
-                        analysis["department"],
+                        safe_value(row, "Department Name", "Unknown"),                                           
 
                     "Urgency":
-                        analysis["urgency"],
+                        analysis.get("backend_priority", analysis.get("urgency", "Low")),
 
                     "Summary":
-                        analysis["summary"],
+                        analysis.get("review_summary", "No summary available"),
 
                     "Recommended Action":
-                        analysis["recommended_action"],
+                        analysis.get("backend_action","No action recommended"),
 
                 }
 
@@ -745,17 +797,6 @@ elif page == "Batch Analysis":
                 index=False
             ).encode("utf-8")
 
-            st.download_button(
-
-                label="⬇ Download Analysis Report",
-
-                data=csv,
-
-                file_name="Retail_Feedback_Analysis.csv",
-
-                mime="text/csv",
-
-            )
 
             # ---------------------------------------
             # Auto Save Individual Reports
@@ -791,26 +832,39 @@ elif page == "Batch Analysis":
 
                         analysis={
 
-                            "estimated_rating":
-                                row["Estimated Rating"],
+                            "zero_shot": {
+                        
+                                "predicted_rating":
+                                    row.get("Predicted Rating", 3),
+                        
+                                "overall_sentiment":
+                                    row.get("Overall Sentiment", "Mixed"),
+                        
+                                "backend_priority":
+                                    row.get("Backend Priority", "Low"),
+                        
+                                "backend_category":
+                                    row.get("Backend Category", "Unknown"),
+                        
+                                "backend_action":
+                                    row.get("Backend Action", "Manual Review"),
+                        
+                                "customer_response":
+                                    row.get("Customer Response", ""),
+                        
+                                "review_summary":
+                                    row.get("Review Summary", "Analysis failed"),
+                        
+                                "business_insight":
+                                    row.get("Business Insight", ""),
 
-                            "product":
-                                row["Product"],
+                                "aspect_sentiments": []
 
-                            "category":
-                                row["Category"],
+                            },
 
-                            "department":
-                                row["Detected Department"],
+                            "few_shot": {},
 
-                            "urgency":
-                                row["Urgency"],
-
-                            "summary":
-                                row["Summary"],
-
-                            "recommended_action":
-                                row["Recommended Action"]
+                            "cot": {}
 
                         }
 
@@ -893,7 +947,10 @@ elif page == "Analytics Dashboard":
         with c2:
 
             avg_rating = round(
-                filtered_df["Estimated Rating"].mean(),
+                pd.to_numeric(
+                    filtered_df["Predicted Rating"],
+                    errors="coerce"
+                ).mean(),
                 2
             )
 
@@ -976,7 +1033,7 @@ elif page == "Analytics Dashboard":
         st.subheader("⭐ Rating Distribution")
 
         rating_chart = (
-            filtered_df["Estimated Rating"]
+            filtered_df["Predicted Rating"]
             .value_counts()
             .sort_index()
         )
@@ -1083,25 +1140,6 @@ elif page == "Analytics Dashboard":
         )
 
 
-# -------------------------------------------------------
-# Recent Batch Results
-# -------------------------------------------------------
-
-if not st.session_state.batch_results.empty:
-
-    st.divider()
-
-    st.header("📊 Recent Batch Analysis")
-
-    st.dataframe(
-
-        st.session_state.batch_results,
-
-        use_container_width=True,
-
-        height=400,
-
-    )
 
 # -------------------------------------------------------
 # Business Insights

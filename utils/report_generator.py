@@ -9,15 +9,12 @@ Generate structured retail reports.
 Features
 --------
 ✔ Customer metadata
-✔ Sentiment
-✔ Confidence
-✔ Estimated Rating
-✔ Product
-✔ Category
-✔ Department
-✔ Urgency
-✔ Summary
-✔ Recommended Action
+✔ RoBERTa sentiment
+✔ LLM Zero Shot analysis
+✔ LLM Few Shot analysis
+✔ LLM COT analysis
+✔ Backend Category
+✔ Business Insight
 ✔ Auto Save CSV
 
 -------------------------------------------------------
@@ -58,126 +55,255 @@ def generate_report(
     review,
     bert_result,
     analysis,
-
 ):
 
     """
-    Generate retail report.
+    Generate retail feedback report.
 
     Parameters
     ----------
+    age : str
+        Customer age
 
-    age
+    recommended : str
+        Recommend product or not
 
-    recommended
+    division : str
+        Product division
 
-    helpful_votes
+    department : str
+        Product department
 
-    division
+    product_class : str
+        Product class
 
-    department
+    review : str
+        Customer review
 
-    product_class
+    bert_result : dict
+        RoBERTa sentiment output
 
-    review
-
-    bert_result
-
-    analysis
+    analysis : dict
+        LLM analysis output
 
     Returns
     -------
-
     pandas.DataFrame
     """
 
     try:
 
+        # -----------------------------------------------
+        # Extract LLM outputs
+        # -----------------------------------------------
+
+        zero_shot = analysis.get(
+            "zero_shot",
+            {}
+        )
+
+        few_shot = analysis.get(
+            "few_shot",
+            {}
+        )
+
+        cot = analysis.get(
+            "cot",
+            {}
+        )
+
+
+        # -----------------------------------------------
+        # Create Report
+        # -----------------------------------------------
+
         report = {
 
+
             "Timestamp":
+
                 datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
 
+
+            # Customer Information
+
             "Age":
                 age,
 
+
             "Recommended":
+
                 recommended,
 
-            "Helpful Votes":
-                helpful_votes,
 
             "Division":
+
                 division,
 
+
             "Department":
+
                 department,
 
+
             "Product Class":
+
                 product_class,
 
+
             "Customer Review":
+
                 review,
 
-            "LLM Zero Shot":
-                zero_shot,
 
-"LLM Few Shot":
-few_shot,
 
-            "Confidence":
+            # -------------------------------------------
+            # RoBERTa Sentiment
+            # -------------------------------------------
+
+            "RoBERTa Sentiment":
+
+                bert_result.get(
+                    "sentiment",
+                    ""
+                ),
+
+
+            "RoBERTa Confidence":
+
                 bert_result.get(
                     "confidence",
                     0
                 ),
 
-            "Estimated Rating":
-                analysis.get(
-                    "estimated_rating",
-                    3
-                ),
 
-            "Product":
-                analysis.get(
-                    "product",
-                    "Unknown"
-                ),
 
-            "Category":
-                analysis.get(
-                    "category",
-                    "Unknown"
-                ),
+            # -------------------------------------------
+            # LLM Comparison
+            # -------------------------------------------
 
-            "Detected Department":
-                analysis.get(
-                    "department",
-                    department
-                ),
+            "LLM Zero Shot":
 
-            "Urgency":
-                analysis.get(
-                    "urgency",
-                    "Low"
-                ),
+                str(zero_shot),
 
-            "Summary":
-                analysis.get(
-                    "summary",
+
+            "LLM Few Shot":
+
+                str(few_shot),
+
+
+            "LLM Chain of Thought":
+
+                str(cot),
+
+
+
+            # -------------------------------------------
+            # Final Business Analysis
+            # Using Zero Shot as primary output
+            # -------------------------------------------
+
+
+            "Predicted Rating":
+
+                zero_shot.get(
+                    "predicted_rating",
                     ""
                 ),
 
-            "Recommended Action":
-                analysis.get(
-                    "recommended_action",
+
+
+            "Overall Sentiment":
+
+                zero_shot.get(
+                    "overall_sentiment",
                     ""
-                )
+                ),
+
+
+
+            "Aspect Sentiments":
+
+                str(
+                    zero_shot.get(
+                        "aspect_sentiments",
+                        []
+                    )
+                ),
+
+
+
+            "Backend Priority":
+
+                zero_shot.get(
+                    "backend_priority",
+                    ""
+                ),
+
+
+
+            "Backend Category":
+
+                zero_shot.get(
+                    "backend_category",
+                    ""
+                ),
+
+
+
+            "Backend Action":
+
+                zero_shot.get(
+                    "backend_action",
+                    ""
+                ),
+
+
+
+            "Customer Response":
+
+                zero_shot.get(
+                    "customer_response",
+                    ""
+                ),
+
+
+
+            "Review Summary":
+
+                zero_shot.get(
+                    "review_summary",
+                    ""
+                ),
+
+
+
+            "Business Insight":
+
+                zero_shot.get(
+                    "business_insight",
+                    ""
+                ),
 
         }
 
-        df = pd.DataFrame([report])
+
+
+        # -----------------------------------------------
+        # DataFrame
+        # -----------------------------------------------
+
+        df = pd.DataFrame(
+            [report]
+        )
+
+
+
+        # -----------------------------------------------
+        # Save CSV
+        # -----------------------------------------------
 
         filename = os.path.join(
 
@@ -188,6 +314,7 @@ few_shot,
 
         )
 
+
         df.to_csv(
 
             filename,
@@ -196,11 +323,15 @@ few_shot,
 
         )
 
+
         logger.info(
             f"Report saved to {filename}"
         )
 
+
         return df
+
+
 
     except Exception as e:
 

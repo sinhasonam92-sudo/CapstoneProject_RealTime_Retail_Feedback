@@ -1,150 +1,101 @@
-"""
--------------------------------------------------------
-
-GPT Review Analyzer
-
-Uses
-
-Azure OpenAI
-+
-Pydantic Validation
-
--------------------------------------------------------
-"""
-
 import json
-import logging
+import time
 
 from config import client, CHAT_MODEL
-
 from prompts.prompts import (
     SYSTEM_PROMPT,
-    ANALYSIS_PROMPT
-)
-
-from model.schema import ReviewAnalysis
-
-
-logger = logging.getLogger(__name__)
-
-
-# -------------------------------------------------------
-# Default Response
-# -------------------------------------------------------
-
-DEFAULT_ANALYSIS = ReviewAnalysis(
-
-    estimated_rating=3,
-
-    product="Unknown",
-
-    category="Unknown",
-
-    department="Unknown",
-
-    urgency="Low",
-
-    summary="Unable to analyze review.",
-
-    recommended_action="Manual Review"
-
+    ZERO_SHOT_PROMPT,
+    FEW_SHOT_PROMPT,
+    COT_PROMPT,
 )
 
 
-# -------------------------------------------------------
-# Review Analysis
-# -------------------------------------------------------
+def run_llm_evaluation(prompt, technique_name, max_retries=3):
+    start_time = time.time()
 
-def analyze_review(
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
 
-    age,
+            result = response.choices[0].message.content.strip()
+            parsed = json.loads(result)
+            default_fields = {
 
-    recommended,
-
-    division,
-
-    department,
-
-    product_class,
-
-    review
-
-):
-
-    try:
-
-        customer_context = f"""
-
-        Customer Details
+                "predicted_rating": "",
+                "overall_sentiment": "",
+                "aspect_sentiments": [],
+            
+                "backend_priority": "",
+                "backend_category": "",
+            
+                "backend_action": "",
+            
+                "customer_response": "",
+            
+                "review_summary": "",
+            
+                "business_insight": ""
         
-        Age : {age}
+            }   
         
-        Recommended : {recommended}
         
-        Division : {division}
+            for key, value in default_fields.items():
         
-        Department : {department}
-        
-        Product Class : {product_class}
-        
-        Customer Review
-        
-        {review}
-        
-        """
+                parsed.setdefault(
+                    key,
+                    value
+                )
 
-        response = client.chat.completions.create(
+            parsed["technique"] = technique_name
+            parsed["model"] = CHAT_MODEL
+            parsed["processing_time"] = round(time.time() - start_time, 2)
 
-            model=CHAT_MODEL,
+            return parsed
 
-            temperature=0,
-
-            response_format={
-
-                "type":"json_object"
-
-            },
-
-            messages=[
-
-                {
-
-                    "role":"system",
-
-                    "content":SYSTEM_PROMPT
-
-                },
-
-                {
-
-                    "role":"system",
-
-                    "content":ANALYSIS_PROMPT
-
-                },
-
-                {
-
-                    "role":"user",
-
-                    "content":customer_context
-
+        except Exception as e:
+            if attempt == max_retries - 1:
+                return {
+                    "technique": technique_name,
+                    "error": str(e),
+                    "processing_time": round(time.time() - start_time, 2),
                 }
 
-            ]
+            time.sleep(2)
 
-        )
 
-        result = response.choices[0].message.content
+def analyze_feedback(review_text, department, product_class):
 
-        data = json.loads(result)
+    zero_prompt = ZERO_SHOT_PROMPT.format(
+        department=department,
+        product_class=product_class,
+        review=review_text,
+    )
 
-        analysis = ReviewAnalysis.model_validate(data)
+    few_prompt = FEW_SHOT_PROMPT.format(
+        department=department,
+        product_class=product_class,
+        review=review_text,
+    )
 
-        return analysis.model_dump()
+    cot_prompt = COT_PROMPT.format(
+        department=department,
+        product_class=product_class,
+        review=review_text,
+    )
 
-    except Exception as e:
+    zero_result = run_llm_evaluation(zero_prompt, "Zero-Shot")
+    few_result = run_llm_evaluation(few_prompt, "Few-Shot")
+    cot_result = run_llm_evaluation(cot_prompt, "Chain-of-Thought")
 
-        logger.exception(e)
-
-        return DEFAULT_ANALYSIS.model_dump()
+    return {
+        "zero_shot": zero_result,
+        "few_shot": few_result,
+        "cot": cot_result,
+    }
